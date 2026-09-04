@@ -2,8 +2,31 @@ importScripts("lib/pdf-lib.min.js", "shared/db.js");
 
 const UNCAPTURABLE_SCHEMES = ["chrome:", "chrome-extension:", "edge:", "about:", "devtools:"];
 
+// タブごとにdebuggerをアタッチしたままにして使い回す(章を移動するたびに
+// アタッチし直すと、そのハンドシェイクの往復がボトルネックになるため)。
+// 1つのタブには同時に1つしかdebuggerをアタッチできないので、この状態管理と
+// 下のキュー(captureQueues)を組み合わせて連続キャプチャの衝突を防ぐ。
+const attachedTabs = new Set();
+// タブごとの直列キュー。同じタブへの連続キャプチャ(例: 本を1章ずつ素早く
+// 「追加→次の章へ移動」を繰り返す)が同時に走ってdebuggerの取り合いに
+// ならないよう、1つずつ順番に処理する。
+const captureQueues = new Map();
+
 chrome.runtime.onInstalled.addListener(() => {
   refreshBadge();
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  captureQueues.delete(tabId);
+  if (attachedTabs.has(tabId)) {
+    attachedTabs.delete(tabId);
+    chrome.debugger.detach({ tabId }, () => void chrome.runtime.lastError);
+  }
+});
+
+// DevToolsを手動で開いた場合など、外部要因でdebuggerが外れたら状態を追従させる
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId != null) attachedTabs.delete(source.tabId);
 });
 
 chrome.commands.onCommand.addListener((command) => {
@@ -24,18 +47,44 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   return false;
 });
 
+function enqueueForTab(tabId, task) {
+  const prev = captureQueues.get(tabId) || Promise.resolve();
+  const settled = prev.then(task, task);
+  // チェーン自体は失敗しても途切れないようにしておく(次のキャプチャが待てるように)
+  captureQueues.set(tabId, settled.catch(() => {}));
+  return settled;
+}
+
 async function handleCapture() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab || !tab.id) {
+    return { ok: false, error: "アクティブなタブが見つかりませんでした" };
+  }
+  const scheme = (tab.url || "").split(":")[0] + ":";
+  if (UNCAPTURABLE_SCHEMES.includes(scheme)) {
+    return { ok: false, error: "このページはキャプチャできません(ブラウザの内部ページです)" };
+  }
+  return enqueueForTab(tab.id, () => captureOneTab(tab));
+}
+
+async function captureOneTab(tab) {
   try {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab || !tab.id) {
-      throw new Error("アクティブなタブが見つかりませんでした");
-    }
-    const scheme = (tab.url || "").split(":")[0] + ":";
-    if (UNCAPTURABLE_SCHEMES.includes(scheme)) {
-      throw new Error("このページはキャプチャできません(ブラウザの内部ページです)");
+    const urlBeforeCapture = tab.url;
+    const pdfBytes = await captureTabAsPdf(tab.id);
+
+    // キャプチャ中にページが遷移していないか一応確認する(タイミング次第では
+    // 取得中に別ページへ移動してしまうことがあるため、その場合はタイトルに
+    // 注意書きを付けて後で見分けられるようにする)
+    let titleSuffix = "";
+    try {
+      const freshTab = await chrome.tabs.get(tab.id);
+      if (freshTab.url && urlBeforeCapture && freshTab.url !== urlBeforeCapture) {
+        titleSuffix = " ⚠取得中にページが変わった可能性";
+      }
+    } catch (_) {
+      // タブが閉じられていた等は無視(PDF自体は取得済み)
     }
 
-    const pdfBytes = await captureTabAsPdf(tab.id);
     const { PDFDocument } = PDFLib;
     const pageCount = (await PDFDocument.load(pdfBytes)).getPageCount();
 
@@ -47,7 +96,7 @@ async function handleCapture() {
       pdfBytes,
       pageCount,
       keepPages: Array.from({ length: pageCount }, (_, i) => i),
-      sourceTitle: tab.title || "",
+      sourceTitle: (tab.title || "") + titleSuffix,
       sourceUrl: tab.url || "",
       capturedAt: Date.now(),
     });
@@ -58,19 +107,20 @@ async function handleCapture() {
   }
 }
 
+async function ensureAttached(tabId) {
+  if (attachedTabs.has(tabId)) return;
+  await debuggerAttach({ tabId });
+  await debuggerSendCommand({ tabId }, "Page.enable", {});
+  attachedTabs.add(tabId);
+}
+
 async function captureTabAsPdf(tabId) {
-  const debuggee = { tabId };
-  await debuggerAttach(debuggee);
-  try {
-    await debuggerSendCommand(debuggee, "Page.enable", {});
-    const result = await debuggerSendCommand(debuggee, "Page.printToPDF", {
-      printBackground: true,
-      preferCSSPageSize: true,
-    });
-    return base64ToUint8Array(result.data);
-  } finally {
-    await debuggerDetach(debuggee);
-  }
+  await ensureAttached(tabId);
+  const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
+    printBackground: true,
+    preferCSSPageSize: true,
+  });
+  return base64ToUint8Array(result.data);
 }
 
 function debuggerAttach(debuggee) {
@@ -79,12 +129,6 @@ function debuggerAttach(debuggee) {
       if (chrome.runtime.lastError) reject(new Error(chrome.runtime.lastError.message));
       else resolve();
     });
-  });
-}
-
-function debuggerDetach(debuggee) {
-  return new Promise((resolve) => {
-    chrome.debugger.detach(debuggee, () => resolve());
   });
 }
 
