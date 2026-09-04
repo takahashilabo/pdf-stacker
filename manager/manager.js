@@ -90,16 +90,21 @@ downloadBtn.addEventListener("click", async () => {
     const blob = new Blob([mergedBytes], { type: "application/pdf" });
     const url = URL.createObjectURL(blob);
 
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = buildFilename();
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 30000);
+    // 拡張機能ページからの <a download> はPDFのblobだとタブ内表示に化けて
+    // PDFビューアのエラー(コード5など)になることがあるため、
+    // chrome.downloads API で確実にファイルとして保存する。
+    try {
+      await chrome.downloads.download({
+        url,
+        filename: buildFilename(),
+        saveAs: false,
+      });
+    } finally {
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+    }
   } catch (err) {
     console.error(err);
-    alert("PDFの結合に失敗しました: " + err.message);
+    alert("PDFの結合またはダウンロードに失敗しました: " + err.message);
   } finally {
     downloadBtn.disabled = false;
     downloadBtn.textContent = originalLabel;
