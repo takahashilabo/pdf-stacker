@@ -5,7 +5,7 @@ const manageBtn = document.getElementById("manageBtn");
 
 async function refreshCount() {
   try {
-    const total = await DB.countPages();
+    const total = await DB.countKeptPages();
     countEl.textContent = total > 0 ? `現在 ${total} ページ蓄積中` : "まだページがありません";
   } catch (err) {
     countEl.textContent = "";

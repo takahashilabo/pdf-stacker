@@ -35,23 +35,30 @@ async function handleCapture() {
       throw new Error("このページはキャプチャできません(ブラウザの内部ページです)");
     }
 
-    const pageBuffers = await captureTabAsPdfPages(tab.id);
-    for (const bytes of pageBuffers) {
-      await DB.addPage({
-        pdfBytes: bytes,
-        sourceTitle: tab.title || "",
-        sourceUrl: tab.url || "",
-        capturedAt: Date.now(),
-      });
-    }
+    const pdfBytes = await captureTabAsPdf(tab.id);
+    const { PDFDocument } = PDFLib;
+    const pageCount = (await PDFDocument.load(pdfBytes)).getPageCount();
+
+    // 印刷1回分をまるごと1レコードとして保存する。ページ単位に分割すると
+    // pdf-libがページごとにフォント/画像を複製し、ページ数に比例して
+    // ファイルサイズが爆発的に増えるため(実測: 584ページで500MB超)、
+    // 分割はせずkeepPagesで「残すページ番号」だけを管理する。
+    await DB.addCapture({
+      pdfBytes,
+      pageCount,
+      keepPages: Array.from({ length: pageCount }, (_, i) => i),
+      sourceTitle: tab.title || "",
+      sourceUrl: tab.url || "",
+      capturedAt: Date.now(),
+    });
     const total = await refreshBadge();
-    return { ok: true, addedCount: pageBuffers.length, total };
+    return { ok: true, addedCount: pageCount, total };
   } catch (err) {
     return { ok: false, error: err && err.message ? err.message : String(err) };
   }
 }
 
-async function captureTabAsPdfPages(tabId) {
+async function captureTabAsPdf(tabId) {
   const debuggee = { tabId };
   await debuggerAttach(debuggee);
   try {
@@ -60,25 +67,10 @@ async function captureTabAsPdfPages(tabId) {
       printBackground: true,
       preferCSSPageSize: true,
     });
-    const pdfBytes = base64ToUint8Array(result.data);
-    return await splitPdfIntoPages(pdfBytes);
+    return base64ToUint8Array(result.data);
   } finally {
     await debuggerDetach(debuggee);
   }
-}
-
-async function splitPdfIntoPages(pdfBytes) {
-  const { PDFDocument } = PDFLib;
-  const src = await PDFDocument.load(pdfBytes);
-  const pageCount = src.getPageCount();
-  const buffers = [];
-  for (let i = 0; i < pageCount; i++) {
-    const dest = await PDFDocument.create();
-    const [copiedPage] = await dest.copyPages(src, [i]);
-    dest.addPage(copiedPage);
-    buffers.push(await dest.save());
-  }
-  return buffers;
 }
 
 function debuggerAttach(debuggee) {
@@ -113,7 +105,7 @@ function base64ToUint8Array(base64) {
 }
 
 async function refreshBadge() {
-  const total = await DB.countPages();
+  const total = await DB.countKeptPages();
   await chrome.action.setBadgeText({ text: total > 0 ? String(total) : "" });
   await chrome.action.setBadgeBackgroundColor({ color: "#3B5BDB" });
   return total;
