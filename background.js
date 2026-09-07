@@ -119,6 +119,15 @@ async function captureTabAsPdf(tabId) {
   const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
     printBackground: true,
     preferCSSPageSize: true,
+    // マージン込みの実効レイアウト幅がサイトのレスポンシブ用ブレークポイント
+    // (768px前後)を下回ると、印刷時にモバイル向けの狭いレイアウトが適用され
+    // ページ幅を使い切らない結果になる(例: デフォルト1inchマージンだと
+    // 8.5inの用紙でも実効幅は624px程度しかない)。マージンを0にして
+    // 実効幅を確保する。
+    marginTop: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    marginRight: 0,
   });
   return base64ToUint8Array(result.data);
 }
