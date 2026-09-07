@@ -119,10 +119,6 @@ async function captureTabAsPdf(tabId) {
   const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
     printBackground: true,
     preferCSSPageSize: true,
-    marginTop: 0,
-    marginBottom: 0,
-    marginLeft: 0,
-    marginRight: 0,
   });
   return base64ToUint8Array(result.data);
 }
