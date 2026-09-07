@@ -114,36 +114,17 @@ async function ensureAttached(tabId) {
   attachedTabs.add(tabId);
 }
 
-// SPAサイト(O'Reilly Learning等)の中には、モバイル/デスクトップ表示の切り替えを
-// CSSの@media printではなくJSでwindow.innerWidthを見て判定しているものがある。
-// この判定はページ読み込み時点の「実際のタブのウィンドウ幅」に依存するため、
-// ウィンドウが狭い状態でキャプチャするとPage.printToPDFの用紙サイズ指定に
-// 関係なくモバイル向けレイアウト(ハンバーガーメニュー等)のまま印刷されてしまう。
-// Emulation.setDeviceMetricsOverrideでJSから見えるビューポート幅を強制的に
-// 広げてからキャプチャすることで、実際のウィンドウ幅に依存せず常にデスクトップ
-// レイアウトで統一する。
-const CAPTURE_VIEWPORT = { width: 1440, height: 1200, deviceScaleFactor: 1, mobile: false };
-const VIEWPORT_SETTLE_MS = 300;
-
 async function captureTabAsPdf(tabId) {
   await ensureAttached(tabId);
-  await debuggerSendCommand({ tabId }, "Emulation.setDeviceMetricsOverride", CAPTURE_VIEWPORT);
-  try {
-    // resizeイベントを受けたJS側の再レイアウト(Reactの再レンダー等)が
-    // 反映されるのを少し待ってから印刷する
-    await new Promise((resolve) => setTimeout(resolve, VIEWPORT_SETTLE_MS));
-    const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
-      printBackground: true,
-      preferCSSPageSize: true,
-      marginTop: 0,
-      marginBottom: 0,
-      marginLeft: 0,
-      marginRight: 0,
-    });
-    return base64ToUint8Array(result.data);
-  } finally {
-    await debuggerSendCommand({ tabId }, "Emulation.clearDeviceMetricsOverride", {}).catch(() => {});
-  }
+  const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
+    printBackground: true,
+    preferCSSPageSize: true,
+    marginTop: 0,
+    marginBottom: 0,
+    marginLeft: 0,
+    marginRight: 0,
+  });
+  return base64ToUint8Array(result.data);
 }
 
 function debuggerAttach(debuggee) {
