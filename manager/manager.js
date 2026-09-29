@@ -7,6 +7,19 @@ const refreshBtn = document.getElementById("refreshBtn");
 const clearBtn = document.getElementById("clearBtn");
 const downloadBtn = document.getElementById("downloadBtn");
 
+// 削除のたびにload()でグリッド全体(サムネイル再描画含む)をやり直すと、
+// まとめて何ページも消したいときに毎回リロードが挟まって面倒なため、
+// 削除操作はDB更新とカード側の見た目の更新(薄く表示+ボタン無効化)だけに
+// とどめ、グリッドの再構築は「再読み込み」ボタンを押したときだけ行う。
+let remainingTotal = 0;
+
+function decrementRemainingTotal() {
+  remainingTotal = Math.max(0, remainingTotal - 1);
+  pageCountEl.textContent = remainingTotal > 0 ? `${remainingTotal} ページ` : "";
+  downloadBtn.disabled = remainingTotal === 0;
+  clearBtn.disabled = remainingTotal === 0;
+}
+
 async function renderThumbnailFromDoc(pdfjsDoc, pageIndex, canvas) {
   const page = await pdfjsDoc.getPage(pageIndex + 1); // pdf.jsは1始まり
   const baseViewport = page.getViewport({ scale: 1 });
@@ -36,14 +49,28 @@ function buildCard(cap, pageIndex, displayIdx, pdfjsDoc) {
   delBtn.className = "del";
   delBtn.textContent = "このページを削除";
   delBtn.addEventListener("click", async () => {
-    const newKeep = cap.keepPages.filter((p) => p !== pageIndex);
-    if (newKeep.length === 0) {
-      await DB.deleteCapture(cap.id);
-    } else {
-      await DB.updateCapture(cap.id, { keepPages: newKeep });
+    delBtn.disabled = true;
+    const originalLabel = delBtn.textContent;
+    delBtn.textContent = "削除中...";
+    try {
+      // capは同じキャプチャの他ページのカードとも共有しているオブジェクトなので、
+      // ここで直接書き換えることで同一キャプチャ内の連続削除にも正しく追従する
+      const newKeep = cap.keepPages.filter((p) => p !== pageIndex);
+      cap.keepPages = newKeep;
+      if (newKeep.length === 0) {
+        await DB.deleteCapture(cap.id);
+      } else {
+        await DB.updateCapture(cap.id, { keepPages: newKeep });
+      }
+      card.classList.add("deleted");
+      delBtn.textContent = "削除済み";
+      decrementRemainingTotal();
+      chrome.runtime.sendMessage({ type: "REFRESH_BADGE" });
+    } catch (err) {
+      delBtn.disabled = false;
+      delBtn.textContent = originalLabel;
+      alert("削除に失敗しました: " + err.message);
     }
-    await load();
-    chrome.runtime.sendMessage({ type: "REFRESH_BADGE" });
   });
   card.appendChild(delBtn);
 
@@ -65,6 +92,7 @@ async function load() {
 
   let totalPages = 0;
   for (const cap of captures) totalPages += cap.keepPages.length;
+  remainingTotal = totalPages;
   pageCountEl.textContent = totalPages > 0 ? `${totalPages} ページ` : "";
   emptyMsg.hidden = totalPages > 0;
   downloadBtn.disabled = totalPages === 0;
