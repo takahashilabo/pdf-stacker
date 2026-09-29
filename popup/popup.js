@@ -2,6 +2,22 @@ const countEl = document.getElementById("count");
 const statusEl = document.getElementById("status");
 const captureBtn = document.getElementById("captureBtn");
 const manageBtn = document.getElementById("manageBtn");
+const scaleInput = document.getElementById("scaleInput");
+
+const DEFAULT_SCALE_PERCENT = 100;
+
+async function loadScale() {
+  const { captureScalePercent } = await chrome.storage.local.get("captureScalePercent");
+  scaleInput.value = captureScalePercent || DEFAULT_SCALE_PERCENT;
+}
+
+scaleInput.addEventListener("change", () => {
+  let percent = Math.round(Number(scaleInput.value));
+  if (!Number.isFinite(percent)) percent = DEFAULT_SCALE_PERCENT;
+  percent = Math.min(200, Math.max(10, percent));
+  scaleInput.value = percent;
+  chrome.storage.local.set({ captureScalePercent: percent });
+});
 
 async function refreshCount() {
   try {
@@ -40,3 +56,4 @@ manageBtn.addEventListener("click", () => {
 });
 
 refreshCount();
+loadScale();

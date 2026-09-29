@@ -114,11 +114,20 @@ async function ensureAttached(tabId) {
   attachedTabs.add(tabId);
 }
 
+async function getCaptureScale() {
+  const { captureScalePercent } = await chrome.storage.local.get("captureScalePercent");
+  const percent = Number(captureScalePercent) || 100;
+  // CDP Page.printToPDFのscaleは0.1〜2の範囲のみ有効
+  return Math.min(2, Math.max(0.1, percent / 100));
+}
+
 async function captureTabAsPdf(tabId) {
   await ensureAttached(tabId);
+  const scale = await getCaptureScale();
   const result = await debuggerSendCommand({ tabId }, "Page.printToPDF", {
     printBackground: true,
     preferCSSPageSize: true,
+    scale,
   });
   return base64ToUint8Array(result.data);
 }

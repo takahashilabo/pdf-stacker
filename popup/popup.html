@@ -68,6 +68,24 @@
   }
   .status.success { color: #2b8a3e; }
   .status.error { color: var(--danger); }
+  .scaleRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 12px;
+    color: var(--muted);
+    margin: 4px 0 12px;
+  }
+  .scaleRow input {
+    width: 56px;
+    padding: 4px 6px;
+    font-size: 12px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    text-align: right;
+  }
 </style>
 </head>
 <body>
@@ -75,6 +93,10 @@
   <div class="count" id="count">読み込み中...</div>
   <button id="captureBtn" class="primary">＋ このページを追加</button>
   <button id="manageBtn">スタックを管理...</button>
+  <div class="scaleRow">
+    <label for="scaleInput">キャプチャ時の縮小率</label>
+    <span><input id="scaleInput" type="number" min="10" max="200" step="5" />%</span>
+  </div>
   <div class="status" id="status"></div>
 
   <script src="../shared/db.js"></script>

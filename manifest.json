@@ -3,7 +3,7 @@
   "name": "PDF Stacker",
   "version": "1.1.0",
   "description": "印刷したページをPDFとして蓄積し、不要なページを削除してから1つのPDFにまとめてダウンロードします。",
-  "permissions": ["debugger", "activeTab", "downloads"],
+  "permissions": ["debugger", "activeTab", "downloads", "storage"],
   "background": {
     "service_worker": "background.js"
   },
